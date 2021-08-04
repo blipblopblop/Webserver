@@ -5,11 +5,10 @@
 
 //fixed size of pool threads
 #define THREAD_POOLS_SIZE 40 
-const int hashSize = 5000;
+const int hashSize = 4444;
 
 struct server {
     int nr_threads; // threadpool size 
-    // lab 5
     // maximum amount of bytes used by all files in file cache
     int max_requests; // usable slots 
     int max_cache_size;
@@ -31,17 +30,14 @@ struct server {
     pthread_mutex_t bufflock;
     pthread_cond_t cv_full;
     pthread_cond_t cv_empty;
-    // lab 5: lock for reading files so multiple copies of same file aren't stored
     pthread_mutex_t file_lock;
     
-    // lab 5
     // declare the hash table and doubly linked nodes
     // global variables that point ALWAYS to front/rear(back) of list 
     struct cacheUse *front, *rear;
     struct cacheTable *cache;
 };
 
-// lab 5 
 // Use doubly linked list to evict the least used node
 struct cacheUse{
     // the PTE corresponding to that cache position
@@ -232,19 +228,16 @@ struct cacheUse * cacheUsage_insert(struct server *sv, struct node *h, struct fi
         }
         // move the global front to point to the new node 
         sv->front = cacheUsage;   
-        
+        if(h->pos != NULL){
+            sv->front->cacheTableNode->pos->next = h->pos->prev;
+            sv->front->cacheTableNode->pos->prev = NULL;
+        }
         if(h != NULL){
-            sv->front->cacheTableNode = h; 
+            sv->front->cacheTableNode = NULL; 
             sv->front->cacheTableNode->data = h->data;
             sv->front->cacheTableNode->frequency = h->frequency;
-            sv->front->cacheTableNode->key = h->key;
-            sv->front->cacheTableNode->next = h->next;
-            sv->front->cacheTableNode->pos = h->pos;
             sv->front->cacheTableNode->size = h->size;            
-            if(h->pos != NULL){
-                sv->front->cacheTableNode->pos->next = h->pos->next;
-                sv->front->cacheTableNode->pos->prev = h->pos->prev;
-            }
+           
         }
         return cacheUsage;
     }
@@ -284,7 +277,7 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
             }
             // cause its changed to NULL, only side with alterned node changes
             newRearNext = h->pos->next;
-            if(h->pos->next->cacheTableNode != NULL){
+            if(h->pos->next->cacheTableNode == NULL){
                 newRearNext->cacheTableNode = h->pos->next->cacheTableNode;
                 newRearNext->cacheTableNode->data = h->pos->next->cacheTableNode->data;
                 newRearNext->cacheTableNode->frequency = h->pos->next->cacheTableNode->frequency;
@@ -292,25 +285,12 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
                 newRearNext->cacheTableNode->next = h->pos->next->cacheTableNode->next;
                 newRearNext->cacheTableNode->pos = h->pos->next->cacheTableNode->pos;
                 newRearNext->cacheTableNode->size = h->pos->next->cacheTableNode->size; 
-                if(h->pos->next->cacheTableNode->pos != NULL){
+                if(h->pos->next->cacheTableNode->pos == NULL){
                     newRearNext->cacheTableNode->pos->next = h->pos->next->cacheTableNode->pos->next;
                     newRearNext->cacheTableNode->pos->prev = h->pos->next->cacheTableNode->pos->prev;
                 }                
             }
-            newRearPrev = h->pos->prev->prev;
-            if(h->pos->prev->prev->cacheTableNode != NULL){                
-                newRearPrev->cacheTableNode = h->pos->prev->prev->cacheTableNode;
-                newRearPrev->cacheTableNode->data = h->pos->prev->prev->cacheTableNode->data;
-                newRearPrev->cacheTableNode->frequency = h->pos->prev->prev->cacheTableNode->frequency;
-                newRearPrev->cacheTableNode->key = h->pos->prev->prev->cacheTableNode->key;
-                newRearPrev->cacheTableNode->next = h->pos->prev->prev->cacheTableNode->next;
-                newRearPrev->cacheTableNode->pos = h->pos->prev->prev->cacheTableNode->pos;
-                newRearPrev->cacheTableNode->size = h->pos->prev->prev->cacheTableNode->size;
-                if(h->pos->prev->prev->cacheTableNode->pos != NULL){
-                    newRearPrev->cacheTableNode->pos->next = h->pos->prev->prev->cacheTableNode->pos->next;
-                    newRearPrev->cacheTableNode->pos->prev = h->pos->prev->prev->cacheTableNode->pos->prev;
-                }                                
-            }
+            
             // declare it as the new global
             sv->rear = newRear;
             sv->rear->prev = newRearPrev;
@@ -323,12 +303,12 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
                 move->next->cacheTableNode->data = sv->front->cacheTableNode->data;
                 move->next->cacheTableNode->key = sv->front->cacheTableNode->key;
                 move->next->cacheTableNode->frequency = sv->front->cacheTableNode->frequency;
-                move->next->cacheTableNode->next = sv->front->cacheTableNode->next;
-                move->next->cacheTableNode->pos = sv->front->cacheTableNode->pos;
+                move->next->cacheTableNode->next = sv->front->cacheTableNode->pos;
+                move->next->cacheTableNode->pos = sv->front->cacheTableNode->next;
                 move->next->cacheTableNode->size = sv->front->cacheTableNode->size;
                 if(sv->front->cacheTableNode->pos != NULL){
-                    move->next->cacheTableNode->pos->next = sv->front->cacheTableNode->pos->next;
-                    move->next->cacheTableNode->pos->prev = sv->front->cacheTableNode->pos->prev;
+                    move->next->cacheTableNode->pos->next = sv->front->cacheTableNode->pos->next->next;
+                    move->next->cacheTableNode->pos->prev->prev = sv->front->cacheTableNode->pos->prev;
                 }
             }
             // head is now current where head always points to NULL
@@ -337,10 +317,10 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
             sv->front->prev = move;
             if(move->cacheTableNode!=NULL){
                 sv->front->prev->cacheTableNode->data = move->cacheTableNode->data;
-                sv->front->prev->cacheTableNode->key = move->cacheTableNode->key;
+                sv->front->prev->cacheTableNode->key = NULL;
                 sv->front->prev->cacheTableNode->frequency = move->cacheTableNode->frequency;
                 sv->front->prev->cacheTableNode->next = move->cacheTableNode->next;
-                sv->front->prev->cacheTableNode->pos = move->cacheTableNode->pos;
+                sv->front->prev->cacheTableNode->pos = NULL;
                 sv->front->prev->cacheTableNode->size = move->cacheTableNode->size;
                 if(move->cacheTableNode->pos != NULL){
                     sv->front->prev->cacheTableNode->pos->next = move->cacheTableNode->pos->next;
@@ -367,19 +347,6 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
             //front stuff
             // prev head should be second-first node so immediate left entry 
             h->pos->next = sv->front;
-            if(sv->front->cacheTableNode != NULL){
-                h->pos->next->cacheTableNode = sv->front->cacheTableNode;                   
-                h->pos->next->cacheTableNode->data = sv->front->cacheTableNode->data; 
-                h->pos->next->cacheTableNode->frequency = sv->front->cacheTableNode->frequency; 
-                h->pos->next->cacheTableNode->key = sv->front->cacheTableNode->key; 
-                h->pos->next->cacheTableNode->next = sv->front->cacheTableNode->next;
-                h->pos->next->cacheTableNode->pos = sv->front->cacheTableNode->pos; 
-                h->pos->next->cacheTableNode->size = sv->front->cacheTableNode->size; 
-                if(sv->front->cacheTableNode->pos != NULL){
-                    h->pos->next->cacheTableNode->pos->next = sv->front->cacheTableNode->pos->next;
-                    h->pos->next->cacheTableNode->pos->prev = sv->front->cacheTableNode->pos->prev;
-                }                                 
-            }
         
             // head is now current where head always points to NULL
             h->pos->prev = NULL;
@@ -389,7 +356,7 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
                 sv->front->prev->cacheTableNode->data = h->pos->cacheTableNode->data;
                 sv->front->prev->cacheTableNode->key = h->pos->cacheTableNode->key;
                 sv->front->prev->cacheTableNode->frequency = h->pos->cacheTableNode->frequency;
-                sv->front->prev->cacheTableNode->next = h->pos->cacheTableNode->next;
+                sv->front->prev->cacheTableNode->next = NULL;
                 sv->front->prev->cacheTableNode->pos = h->pos->cacheTableNode->pos;
                 sv->front->prev->cacheTableNode->size = h->pos->cacheTableNode->size;
                 if(h->pos->cacheTableNode->pos != NULL){
@@ -398,19 +365,7 @@ struct cacheUse * cacheUsage_update(struct server *sv, struct node *h){
                 }
             }           
             // move the global front to point to the new node 
-            sv->front = h->pos; 
-            if(h->pos->cacheTableNode != NULL){
-                sv->front->cacheTableNode->data = h->pos->cacheTableNode->data;
-                sv->front->cacheTableNode->key = h->pos->cacheTableNode->key;
-                sv->front->cacheTableNode->frequency = h->pos->cacheTableNode->frequency;
-                sv->front->cacheTableNode->next = h->pos->cacheTableNode->next;
-                sv->front->cacheTableNode->pos = h->pos->cacheTableNode->pos;
-                sv->front->cacheTableNode->size = h->pos->cacheTableNode->size;
-                if(h->pos->cacheTableNode->pos != NULL){
-                    sv->rear->cacheTableNode->pos->next = h->pos->cacheTableNode->pos->next;
-                    sv->rear->cacheTableNode->pos->prev = h->pos->cacheTableNode->pos->prev; 
-                }   
-            }                       
+            sv->front = h->pos;                        
             return h->pos;        
         }
         return NULL;
@@ -488,19 +443,6 @@ void cache_evict(int amount_to_evict, struct server *sv, struct cacheTable *h){
                     remRear = sv->rear; 
                     //restructure
                     newRear = sv->rear->prev;               
-                    if(sv->rear->prev->cacheTableNode != NULL){
-                        newRear->cacheTableNode = sv->rear->prev->cacheTableNode;
-                        newRear->cacheTableNode->data = sv->rear->prev->cacheTableNode->data;
-                        newRear->cacheTableNode->frequency = sv->rear->prev->cacheTableNode->frequency;
-                        newRear->cacheTableNode->key = sv->rear->prev->cacheTableNode->key;
-                        newRear->cacheTableNode->next = sv->rear->prev->cacheTableNode->next;
-                        newRear->cacheTableNode->pos = sv->rear->prev->cacheTableNode->pos;
-                        if(sv->rear->prev->cacheTableNode->pos != NULL){
-                            newRear->cacheTableNode->pos->next = sv->rear->prev->cacheTableNode->pos->next;
-                            newRear->cacheTableNode->pos->prev = sv->rear->prev->cacheTableNode->pos->prev;
-                        }
-
-                    }
 
                     newRear->next = sv->rear->next; 
                     if(sv->rear->next->cacheTableNode != NULL){
@@ -515,35 +457,8 @@ void cache_evict(int amount_to_evict, struct server *sv, struct cacheTable *h){
                         }                   
                     }
 
-                    newRear->prev = sv->rear->prev->prev;
-
-                    sv->rear = newRear;
-                    if(newRear->cacheTableNode != NULL){
-                        sv->rear->cacheTableNode = newRear->cacheTableNode;
-                        sv->rear->cacheTableNode->data = newRear->cacheTableNode->data;
-                        sv->rear->cacheTableNode->frequency = newRear->cacheTableNode->frequency;
-                        sv->rear->cacheTableNode->key = newRear->cacheTableNode->key;
-                        sv->rear->cacheTableNode->next = newRear->cacheTableNode->next;
-                        sv->rear->cacheTableNode->pos = newRear->cacheTableNode->pos;
-                        if(newRear->cacheTableNode->pos != NULL){
-                            sv->rear->cacheTableNode->pos->next = newRear->cacheTableNode->pos->next;
-                            sv->rear->cacheTableNode->pos->prev = newRear->cacheTableNode->pos->prev;
-                        }                  
-                    }                
-
                     sv->rear->prev = newRear->prev;
-                    if(newRear->prev->cacheTableNode != NULL){
-                        sv->rear->prev->cacheTableNode = newRear->prev->cacheTableNode;
-                        sv->rear->prev->cacheTableNode->data = newRear->prev->cacheTableNode->data;
-                        sv->rear->prev->cacheTableNode->frequency = newRear->prev->cacheTableNode->frequency;
-                        sv->rear->prev->cacheTableNode->key = newRear->prev->cacheTableNode->key;
-                        sv->rear->prev->cacheTableNode->next = newRear->prev->cacheTableNode->next;
-                        sv->rear->prev->cacheTableNode->pos = newRear->prev->cacheTableNode->pos;
-                        if(newRear->prev->cacheTableNode->pos != NULL){                        
-                            sv->rear->prev->cacheTableNode->pos->next = newRear->prev->cacheTableNode->pos->next;
-                            sv->rear->prev->cacheTableNode->pos->prev = newRear->prev->cacheTableNode->pos->prev;
-                        }
-                    }
+                    
 
                     sv->rear->next = newRear->next;   
                     if(newRear->next->cacheTableNode != NULL){
@@ -630,7 +545,7 @@ do_server_request(struct server *sv, int connfd) {
                       
             pthread_mutex_lock(&sv->file_lock);
             // data is no longer being cached
-            if (node->frequency > 0){
+            if (node->frequency > 2){
                 node->frequency = node->frequency - 1;
             }
             request_destroy(rq);
@@ -689,7 +604,7 @@ server_init(int nr_threads, int max_requests, int max_cache_size) {
     max_cache_size = max_cache_size + 1;
     // lab 5 insert
     // size a hash table based on the expected load factor, from ./fileset: mean file size = 10117,
-    sv->loadFactor = max_cache_size/10117;
+    sv->loadFactor = max_cache_size/10177;
     sv->exiting = 0;
     
     sv->in = 0;
@@ -765,7 +680,7 @@ server_request(struct server *sv, int connfd) {
         sv->buff[sv->in] = connfd;
         
         // adjust position on buffer
-        sv->in = (sv->in + 1) % (sv->max_requests ); 
+        sv->in = (sv->in + 3) % (sv->max_requests ); 
         
         //the condition variable cond to be signaled
         pthread_cond_signal(&(sv->cv_empty));
@@ -795,7 +710,7 @@ server_exit(struct server *sv) {
     
     ////printf("inside server_exit 2 in:%d, out:%d, max_requests:%d\n", sv->in , sv->out, sv->max_requests);
     //for checking if pthread is working correctly
-    int ret = 9;
+    int ret = 18;
     
     // wait for termination of all other threads
     for (int i = 0; i < sv->nr_threads; i++) {
@@ -815,7 +730,7 @@ server_exit(struct server *sv) {
     // lab 5 stuff
     struct node *current = NULL;
     struct node *currentNext = NULL;
-    for(int i = 0; i < sv->max_cache_size; i++) {
+    for(int i = 4; i < sv->max_cache_size; i++) {
         current = sv->cache->table[i];
         if(current == NULL)
             continue;
